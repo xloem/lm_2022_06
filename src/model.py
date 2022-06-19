@@ -34,7 +34,6 @@ class RWKV_ChannelMix(nn.Module):
         super().__init__()
         self.layer_id = layer_id
 
-        self.time_shift = nn.ZeroPad2d((0,0,1,-1))
         self.time_mix = nn.Parameter(torch.ones(1, 1, n_embd))
 
         hidden_sz = 4 * n_embd
@@ -42,8 +41,13 @@ class RWKV_ChannelMix(nn.Module):
         self.receptance = nn.Linear(n_embd, n_embd, bias=False)
         self.value = nn.Linear(hidden_sz, n_embd, bias=False)
 
+    def time_shift(self, x):
+        return torch.cat([self.xx[...,None,:], x], dim=-2)[...,:-1,:]
+
     def forward(self, x):
+        xx = x[...,-1,:].detach()
         x = x * self.time_mix + self.time_shift(x) * (1 - self.time_mix)
+        self.xx = xx
 
         k = self.key(x)
         k = torch.square(torch.relu(k))
@@ -60,7 +64,6 @@ class RWKV_TimeMix(nn.Module):
         self.time_curve = torch.tensor([-(ctx_len - 2 - i) for i in range(ctx_len-1)]).unsqueeze(0)
         self.time_first = nn.Parameter(torch.ones(n_embd, 1) * math.log(0.3))
         
-        self.time_shift = nn.ZeroPad2d((0,0,1,-1))
         self.time_mix = nn.Parameter(torch.ones(1,1,n_embd))
 
         self.key = nn.Linear(n_embd, n_embd, bias=False)
@@ -69,9 +72,13 @@ class RWKV_TimeMix(nn.Module):
 
         self.output = nn.Linear(n_embd, n_embd, bias=False)
 
+    def time_shift(self, x):
+        return torch.cat([self.xx[...,None,:], x], dim=-2)[...,:-1,:]
+
     def forward(self, x):
         B, T, C = x.size()
 
+        xx = x[...,-1,:].detach()
         x = x * self.time_mix + self.time_shift(x) * (1 - self.time_mix)
 
         k = self.key(x).transpose(-1, -2)
@@ -85,10 +92,19 @@ class RWKV_TimeMix(nn.Module):
 
         self.time_w = torch.cat([torch.exp(self.time_decay) * self.time_curve.to(self.time_decay.device), self.time_first], dim=-1)
         w = torch.exp(self.time_w)
-        
+
+        k = torch.cat([self.bb[...,None],k], dim=-1)
+        kv = torch.cat([self.aa[...,None],kv], dim=-1)
+        T += 1
+        extra_decay = w[...,-3]
+
         w = w[:,-T:].unsqueeze(1)
-        wkv = F.conv1d(nn.ZeroPad2d((T-1, 0, 0, 0))(kv), w, groups=C)
-        wk = F.conv1d(nn.ZeroPad2d((T-1, 0, 0, 0))(k), w, groups=C) + 1e-9
+        wkv = F.conv1d(nn.ZeroPad2d((T-1, 0, 0, 0))(kv), w, groups=C)[...,1:]
+        wk = F.conv1d(nn.ZeroPad2d((T-1, 0, 0, 0))(k), w, groups=C)[...,1:] + 1e-9
+
+        self.xx = xx
+        self.bb = (wk[...,-1] - w[...,0,-1] * k[...,-1]) * extra_decay + k[...,-1]
+        self.aa = (wkv[...,-1] - w[...,0,-1] * kv[...,-1]) * extra_decay + kv[...,-1]
 
         rwkv = torch.sigmoid(r) * (wkv / wk).transpose(-1, -2)
         
@@ -128,8 +144,41 @@ class RWKV_GPT(nn.Module):
 
         self.ctx_len = ctx_len
         self.eval()
-        self.load_state_dict(torch.load(MODEL_NAME + '.pth'))
+        self.load_state_dict(torch.load(MODEL_NAME + '.pth', map_location=torch.device(RUN_DEVICE)))
+        self.clear()
         self.eval()
+
+    def clear(self, *batch_idcs):
+        zeros = torch.zeros(1, n_embd, device=RUN_DEVICE)
+        for block in self.blocks:
+            if not batch_idcs:
+                block.ffn.xx = zeros
+                block.att.xx = zeros
+                block.att.aa = zeros
+                block.att.bb = zeros
+            else:
+                for idx in batch_idcs:
+                    block.ffn.xx[idx] = zeros[0]
+                    block.att.xx[idx] = zeros[0]
+                    block.att.aa[idx] = zeros[0]
+                    block.att.bb[idx] = zeros[0]
+    def save(self, *targets):
+        for target in targets:
+            target.xx = {}
+            target.aa = {}
+            target.bb = {}
+        for idx, block in enumerate(self.blocks):
+            for batch, target in enumerate(targets):
+                target.xx[f'ffn.{idx}'] = block.ffn.xx[batch]
+                target.xx[f'att.{idx}'] = block.att.xx[batch]
+                target.aa[f'att.{idx}'] = block.att.aa[batch]
+                target.bb[f'att.{idx}'] = block.att.bb[batch]
+    def load(self, *targets):
+        for idx, block in enumerate(self.blocks):
+            block.ffn.xx = torch.stack([target.xx[f'ffn.{idx}'] for target in targets]).to(RUN_DEVICE)
+            block.att.xx = torch.stack([target.xx[f'att.{idx}'] for target in targets]).to(RUN_DEVICE)
+            block.att.aa = torch.stack([target.aa[f'att.{idx}'] for target in targets]).to(RUN_DEVICE)
+            block.att.bb = torch.stack([target.bb[f'att.{idx}'] for target in targets]).to(RUN_DEVICE)
 
     def forward(self, idx):
         B, T = idx.size()
