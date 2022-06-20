@@ -106,14 +106,14 @@ class RWKV_TimeMix(nn.Module):
 
         w = w[:,-T:].unsqueeze(1)
         wkv = F.conv1d(nn.ZeroPad2d((T-1, 0, 0, 0))(kv), w, groups=C)[...,1:]
-        wk = F.conv1d(nn.ZeroPad2d((T-1, 0, 0, 0))(k), w, groups=C)[...,1:] + 1e-9
+        wk = F.conv1d(nn.ZeroPad2d((T-1, 0, 0, 0))(k), w, groups=C)[...,1:]
 
         self.xx = xx
         self.bb = (wk[...,-1] - w[...,0,-1] * k[...,-1]) * extra_decay + k[...,-1]
         self.aa = (wkv[...,-1] - w[...,0,-1] * kv[...,-1]) * extra_decay + kv[...,-1]
         self.mm = mm
 
-        rwkv = torch.sigmoid(r) * (wkv / wk).transpose(-1, -2)
+        rwkv = torch.sigmoid(r) * torch.nan_to_num((wkv / wk), nan=0, posinf=torch.inf, neginf=-torch.inf).transpose(-1, -2)
         
         rwkv = self.output(rwkv)
         return rwkv
@@ -315,7 +315,7 @@ class RWKV_RNN():
         b = bb + w.time_first * k
         self.mm[name] = mm
 
-        rwkv = r * a / (b + 1e-9)
+        rwkv = r * torch.nan_to_num(a / b, nan=0, posinf=torch.inf, neginf=-torch.inf)
 
         return w.output.weight @ rwkv
 
