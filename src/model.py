@@ -85,16 +85,22 @@ class RWKV_TimeMix(nn.Module):
         v = self.value(x).transpose(-1, -2)
         r = self.receptance(x)
 
-        k = torch.clamp(k, max=60)
-        k = torch.exp(k)
+        mm = torch.max(k, dim=-1).values
+
+        # giving mm a mantissa of 1 prevents floating point changes
+        mm = torch.frexp(mm)
+        mm = torch.ldexp(torch.tensor(0.5,device=k.device), mm.exponent)
+
+        k = torch.exp(k - mm[...,None])
 
         kv = k * v
 
         self.time_w = torch.cat([torch.exp(self.time_decay) * self.time_curve.to(self.time_decay.device), self.time_first], dim=-1)
         w = torch.exp(self.time_w)
 
-        k = torch.cat([self.bb[...,None],k], dim=-1)
-        kv = torch.cat([self.aa[...,None],kv], dim=-1)
+        recurrent_scaling_factor = torch.exp(self.mm - mm)
+        k = torch.cat([(self.bb * recurrent_scaling_factor)[...,None],k], dim=-1)
+        kv = torch.cat([(self.aa * recurrent_scaling_factor)[...,None],kv], dim=-1)
         T += 1
         extra_decay = w[...,-3]
 
@@ -105,6 +111,7 @@ class RWKV_TimeMix(nn.Module):
         self.xx = xx
         self.bb = (wk[...,-1] - w[...,0,-1] * k[...,-1]) * extra_decay + k[...,-1]
         self.aa = (wkv[...,-1] - w[...,0,-1] * kv[...,-1]) * extra_decay + kv[...,-1]
+        self.mm = mm
 
         rwkv = torch.sigmoid(r) * (wkv / wk).transpose(-1, -2)
         
@@ -156,29 +163,35 @@ class RWKV_GPT(nn.Module):
                 block.att.xx = zeros
                 block.att.aa = zeros
                 block.att.bb = zeros
+                block.att.mm = zeros
             else:
                 for idx in batch_idcs:
                     block.ffn.xx[idx] = zeros[0]
                     block.att.xx[idx] = zeros[0]
                     block.att.aa[idx] = zeros[0]
                     block.att.bb[idx] = zeros[0]
+                    block.att.mm[idx] = zeros[0]
     def save(self, *targets):
         for target in targets:
             target.xx = {}
             target.aa = {}
             target.bb = {}
+            target.mm = {}
         for idx, block in enumerate(self.blocks):
             for batch, target in enumerate(targets):
                 target.xx[f'ffn.{idx}'] = block.ffn.xx[batch]
                 target.xx[f'att.{idx}'] = block.att.xx[batch]
                 target.aa[f'att.{idx}'] = block.att.aa[batch]
                 target.bb[f'att.{idx}'] = block.att.bb[batch]
+                target.mm[f'att.{idx}'] = block.att.mm[batch]
     def load(self, *targets):
+        zeros = torch.zeros(1, n_embd, device=RUN_DEVICE)
         for idx, block in enumerate(self.blocks):
             block.ffn.xx = torch.stack([target.xx[f'ffn.{idx}'] for target in targets]).to(RUN_DEVICE)
             block.att.xx = torch.stack([target.xx[f'att.{idx}'] for target in targets]).to(RUN_DEVICE)
             block.att.aa = torch.stack([target.aa[f'att.{idx}'] for target in targets]).to(RUN_DEVICE)
             block.att.bb = torch.stack([target.bb[f'att.{idx}'] for target in targets]).to(RUN_DEVICE)
+            block.att.mm = torch.stack([target.mm[f'att.{idx}'] if hasattr(target, 'mm') else zeros[0] for target in targets]).to(RUN_DEVICE)
 
     def forward(self, idx):
         B, T = idx.size()
@@ -239,14 +252,20 @@ class RWKV_RNN():
         self.xx = {}
         self.aa = {}
         self.bb = {}
+        self.mm = {}
     def save(self, target):
         target.xx = copy.deepcopy(self.xx)
         target.aa = copy.deepcopy(self.aa)
         target.bb = copy.deepcopy(self.bb)
+        target.mm = copy.deepcopy(self.mm)
     def load(self, target):
         self.xx = copy.deepcopy(target.xx)
         self.aa = copy.deepcopy(target.aa)
         self.bb = copy.deepcopy(target.bb)
+        if hasattr(target, 'mm'):
+            self.mm = copy.deepcopy(target.mm)
+        else:
+            self.mm = {}
 
     def LN(self, xx, w):
         return F.layer_norm(xx, (n_embd,), weight=w.weight, bias=w.bias)
@@ -269,19 +288,32 @@ class RWKV_RNN():
             self.xx[name] = torch.zeros(n_embd, device=RUN_DEVICE)
             self.aa[name] = torch.zeros(n_embd, device=RUN_DEVICE)
             self.bb[name] = torch.zeros(n_embd, device=RUN_DEVICE)
+        if name not in self.mm:
+            self.mm[name] = torch.zeros(n_embd, device=RUN_DEVICE)
         x = xx * w.time_mix + self.xx[name] * (1 - w.time_mix)
         self.xx[name] = xx
 
         r = torch.sigmoid(w.receptance.weight @ x)
 
-        k = torch.exp(torch.clamp(w.key.weight @ x, max=60))
+        k = w.key.weight @ x
+        mm = k
+
+        # giving mm a mantissa of 1 prevents floating point changes
+        mm = torch.frexp(mm)
+        mm = torch.ldexp(torch.tensor(0.5,device=k.device), mm.exponent)
+        
+        k = torch.exp(k - mm)
         v = w.value.weight @ x
         kv = k * v
 
-        a = self.aa[name] + w.time_first * kv
-        b = self.bb[name] + w.time_first * k
-        self.aa[name] = w.time_decay * self.aa[name] + kv
-        self.bb[name] = w.time_decay * self.bb[name] + k
+        recurrent_scaling_factor = torch.exp(self.mm[name] - mm)
+        aa = self.aa[name] * recurrent_scaling_factor
+        bb = self.bb[name] * recurrent_scaling_factor
+        self.aa[name] = w.time_decay * aa + kv
+        self.bb[name] = w.time_decay * bb + k
+        a = aa + w.time_first * kv
+        b = bb + w.time_first * k
+        self.mm[name] = mm
 
         rwkv = r * a / (b + 1e-9)
 
