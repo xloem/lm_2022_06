@@ -36,7 +36,7 @@ m2 = torch.load(model_name + '.pth')
 model_train.load_state_dict(m2)
 
 model_rnn = RWKV_RNN(model_name)
-model_gpt = RWKV_GPT(model_name).cuda()
+model_gpt = RWKV_GPT(model_name).cpu()#.cuda()
 
 ########################################################################################################
 
@@ -45,7 +45,8 @@ ctx = tokenizer.encode(context)
 print(f'input len {len(ctx)} data {ctx}')
 
 print('\nRWKV-GPT output')
-out = model_gpt.forward(torch.tensor(ctx).unsqueeze(0).cuda())[0].detach().cpu().numpy()
+#out = model_gpt.forward(torch.tensor(ctx).unsqueeze(0).cuda())[0].detach().cpu().numpy()
+out = model_gpt.forward(torch.tensor(ctx).unsqueeze(0).cpu())[0].detach().cpu().numpy()
 print(out)
 
 print('\nRWKV-RNN output')
