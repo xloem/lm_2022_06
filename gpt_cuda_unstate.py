@@ -11,7 +11,7 @@ if len(sys.argv) != 3:
 MODEL_NAME=sys.argv[1]
 STATE_NAME=sys.argv[2]
 
-with open(STATE_NAME, 'rb') as file:
+with open(STATE_NAME + '.pickle', 'rb') as file:
     state = pickle.load(file)
 
 w = torch.load(MODEL_NAME + '.pth', map_location=src.model.RUN_DEVICE)

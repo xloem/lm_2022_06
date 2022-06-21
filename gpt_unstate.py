@@ -12,7 +12,7 @@ if len(sys.argv) != 3:
 MODEL_NAME=sys.argv[1]
 STATE_NAME=sys.argv[2]
 
-with open(STATE_NAME, 'rb') as file:
+with open(STATE_NAME + '.pickle', 'rb') as file:
     state = pickle.load(file)
 
 gptmodel = RWKV_GPT(MODEL_NAME=MODEL_NAME)
