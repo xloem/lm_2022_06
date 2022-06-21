@@ -2,7 +2,6 @@
 import sys, pickle
 import src.model
 from src.model import RWKV_GPT
-from src.model_train import GPT as GPT_Train, GPTConfig
 import torch
 
 if len(sys.argv) != 3:
