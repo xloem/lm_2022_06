@@ -32,7 +32,7 @@ def process(token_id):
   token_ids.append(0) # padding tokens are added to simplify comparison with gpt_cuda_unstate
     # load state
   gptmodel.load(state)
-  logits = gptmodel(torch.tensor([token_ids]), recur=True)[0,-2,:]
+  logits = gptmodel(torch.tensor([token_ids]), recur=True)[0,-3,:]
   # use max(range,key) as an argmax for python list to do greedy sampling
   token_id = torch.argmax(logits)
   return token_id
