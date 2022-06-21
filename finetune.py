@@ -17,6 +17,11 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cuda.matmul.allow_tf32 = True
 
+# lightweight values to test on my 2GB gpu
+#ctx_len = 96
+#n_layer = 3
+#n_embd = 128
+
 ctx_len = 768
 n_layer = 24
 n_embd = 1024
@@ -51,6 +56,8 @@ warmup_tokens = 0
 betas = (0.9, 0.99)
 eps = 1e-8
 
+ctx_len -= 1 # to hold recurrence k & kv
+
 num_workers = 0
 
 ########################################################################################################
@@ -58,29 +65,46 @@ num_workers = 0
 ########################################################################################################
 
 class Dataset(Dataset):
-    def __init__(self, data, vocab_size, ctx_len, epoch_length_fixed):
+    def __init__(self, data, vocab_size, ctx_len, epoch_length_fixed, batch_size):
         data_size, vocab_size = len(data), vocab_size
         print('data has %d tokens, %d unique.' % (data_size, vocab_size))
         self.ctx_len = ctx_len
         self.epoch_length_fixed = epoch_length_fixed
         self.vocab_size = vocab_size
         self.data = data
+        self.batch_size = batch_size
+
+    def __iter__(self):
+        for idx in range(len(self)):
+            yield self[idx]
 
     def __len__(self):
         return self.epoch_length_fixed
 
     def __getitem__(self, idx):
-        # cheat: pick a random spot in dataset
-        i = np.random.randint(0, len(self.data) - (self.ctx_len + 1))
-        dix = self.data[i:i+self.ctx_len+1]
-        x = torch.tensor(dix[:-1], dtype=torch.long,
+        if idx == 0:
+            # cheat: pick random mini-epoch offsets in dataset
+            self.epoch_offsets = np.random.randint(0, len(self.data) - (self.ctx_len * self.epoch_length_fixed + 1), self.batch_size)
+
+        epoch_offsets = self.epoch_offsets + self.ctx_len * idx
+        dixes = [
+            self.data[epoch_offset:epoch_offset + self.ctx_len+1]
+            for epoch_offset in epoch_offsets
+        ]
+        x = torch.stack([
+            torch.tensor(dix[:-1], dtype=torch.long,
                          device=torch.device('cuda'))
-        y = torch.tensor(dix[1:], dtype=torch.long,
+            for dix in dixes
+        ])
+        y = torch.stack([
+            torch.tensor(dix[1:], dtype=torch.long,
                          device=torch.device('cuda'))
-        return x, y
+            for dix in dixes
+        ])
+        return idx, x, y
 
 print('loading data... ' + datafile)
-train_dataset = Dataset(np.load(datafile).astype('int'), vocab_size, ctx_len, epoch_length_fixed)
+train_dataset = Dataset(np.load(datafile).astype('int'), vocab_size, ctx_len, epoch_length_fixed, batch_size)
 
 ########################################################################################################
 # Train model
@@ -95,9 +119,12 @@ if __name__ == '__main__':
     model = GPT(GPTConfig(train_dataset.vocab_size, train_dataset.ctx_len, model_type=model_type,
                           n_layer=n_layer, n_embd=n_embd)).cuda()
 
-    print('loading ' + model_name)
-    m2 = torch.load(model_name + '.pth')
-    model.load_state_dict(m2)
+    try:
+        print('loading ' + model_name)
+        m2 = torch.load(model_name + '.pth')
+        model.load_state_dict(m2)
+    except:
+        print('failed to load, will make new')
 
     print('model', model_type, 'epoch', n_epoch, 'batchsz', batch_size, 'betas',
           betas, 'eps', eps, 'ctx', ctx_len, 'layer', n_layer, 'embd', n_embd, )

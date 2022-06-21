@@ -87,22 +87,22 @@ class Trainer:
 
             if config.num_workers > 0:
                 loader = DataLoader(data, shuffle=False, pin_memory=True,
-                                    batch_size=config.batch_size,
+                                    batch_size=1, # batches managed by dataset
                                     num_workers=config.num_workers)
             else:
                 loader = DataLoader(data, shuffle=False,
-                                    batch_size=config.batch_size,
+                                    batch_size=1, # batches managed by dataset
                                     num_workers=config.num_workers)
 
             pbar = tqdm(enumerate(loader), total=len(
                 loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}') if is_train else enumerate(loader)
 
-            for it, (x, y) in pbar:
+            for it, (epoch_idx, x, y) in pbar:
                 x = x.to(self.device)  # place data on the correct device
                 y = y.to(self.device)
 
                 with torch.set_grad_enabled(is_train):
-                    _, loss = model(x, y)  # forward the model
+                    _, loss = model(x, y, recur=(epoch_idx > 0))  # forward the model
 
                 if is_train:  # backprop and update the parameters
                     model.zero_grad()

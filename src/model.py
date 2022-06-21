@@ -113,7 +113,7 @@ class RWKV_TimeMix(nn.Module):
         self.aa = (wkv[...,-1] - w[...,0,-1] * kv[...,-1]) * extra_decay + kv[...,-1]
         self.mm = mm
 
-        rwkv = torch.sigmoid(r) * torch.nan_to_num((wkv / wk), nan=0, posinf=torch.inf, neginf=-torch.inf).transpose(-1, -2)
+        rwkv = torch.sigmoid(r) * torch.nan_to_num((wkv / wk)).transpose(-1, -2)
         
         rwkv = self.output(rwkv)
         return rwkv
@@ -193,7 +193,9 @@ class RWKV_GPT(nn.Module):
             block.att.bb = torch.stack([target.bb[f'att.{idx}'] for target in targets]).to(RUN_DEVICE)
             block.att.mm = torch.stack([target.mm[f'att.{idx}'] if hasattr(target, 'mm') else zeros[0] for target in targets]).to(RUN_DEVICE)
 
-    def forward(self, idx):
+    def forward(self, idx, recur=False):
+        if not recur:
+            self.clear()
         B, T = idx.size()
         assert T <= self.ctx_len, "Cannot forward, because len(input) > model ctx_len."
         
@@ -315,7 +317,7 @@ class RWKV_RNN():
         b = bb + w.time_first * k
         self.mm[name] = mm
 
-        rwkv = r * torch.nan_to_num(a / b, nan=0, posinf=torch.inf, neginf=-torch.inf)
+        rwkv = r * torch.nan_to_num(a / b)
 
         return w.output.weight @ rwkv
 

@@ -2,6 +2,7 @@
 # The RWKV Language Model - https://github.com/BlinkDL/RWKV-LM
 ########################################################################################################
 
+from importlib import abc # works around python bug importing timex
 from torch.utils.cpp_extension import load
 import math
 import numpy as np
@@ -108,7 +109,7 @@ class RWKV_TimeMix(nn.Module):
     def __init__(self, config, layer_id):
         super().__init__()
         self.layer_id = layer_id
-        self.ctx_len = config.ctx_len
+        self.ctx_len = config.ctx_len + 1
         self.n_embd = config.n_embd
 
         attn_sz = config.n_embd
@@ -135,12 +136,11 @@ class RWKV_TimeMix(nn.Module):
                 decay_speed[h][0] = math.pow(f2, h / (attn_sz-1) * 7) * f1
         self.time_decay = nn.Parameter(torch.log(decay_speed)) # will use exp(self.time_decay) to ensure time_decay > 0
         self.time_curve = torch.tensor(
-            [-(config.ctx_len - 2 - i) for i in range(config.ctx_len-1)]).unsqueeze(0)
+            [-(self.ctx_len - 2 - i) for i in range(self.ctx_len-1)]).unsqueeze(0)
         self.time_curve = self.time_curve.to('cuda')
         self.time_first = nn.Parameter(torch.ones(attn_sz, 1) * math.log(0.3))
         #############################################################################
 
-        self.time_shift = nn.ZeroPad2d((0, 0, 1, -1))
         with torch.no_grad():  # init to "shift half of the channels"
             ww = torch.ones(1, 1, config.n_embd)
             for i in range(config.n_embd // 2):
@@ -157,9 +157,12 @@ class RWKV_TimeMix(nn.Module):
         self.receptance.scale_init = 0
         self.output.scale_init = 0
 
+    def time_shift(self, x):
+        return torch.cat([self.xx[...,None,:], x], dim=-2)[...,:-1,:]
+
     def forward(self, x):
         B, T, C = x.size()
-        assert T == self.ctx_len
+        assert T == self.ctx_len - 1
 
         x = x * self.time_mix + self.time_shift(x) * (1 - self.time_mix)
 
@@ -167,20 +170,34 @@ class RWKV_TimeMix(nn.Module):
         v = self.value(x).transpose(-1, -2)
         r = self.receptance(x)
 
-        # RWKV_K_CLAMP can be removed if the CUDA kernel substracts the correct k_max for each k (I will do this later)
-        k = torch.clamp(k, max=RWKV_K_CLAMP)
-        k = torch.exp(k)
+        mm = torch.max(k, dim=-1).values
+
+        # giving mm a mantissa of 1 prevents floating point changes
+        mm = torch.frexp(mm)
+        mm = torch.ldexp(torch.tensor(0.5,device=k.device), mm.exponent)
+
+        k = torch.exp(k - mm[...,None])
         kv = k * v
 
         self.time_w = torch.cat(
             [torch.exp(self.time_decay) * self.time_curve, self.time_first], dim=-1)
         w = torch.exp(self.time_w)
 
-        wkv = TimeX.apply(w, kv, B, C, T, 0)
-        # RWKV_K_EPS can be removed if the CUDA kernel sets 0/0 = 0 (I will do this later)
-        wk = TimeX.apply(w, k, B, C, T, RWKV_K_EPS)
+        recurrent_scaling_factor = torch.exp(self.mm - mm)
+        k = torch.cat([(self.bb * recurrent_scaling_factor)[...,None],k], dim=-1)
+        kv = torch.cat([(self.aa * recurrent_scaling_factor)[...,None],kv], dim=-1)
+        T += 1
+        extra_decay = w[...,-3]
 
-        rwkv = torch.sigmoid(r) * (wkv / wk).transpose(-1, -2)
+        wkv = TimeX.apply(w, kv, B, C, T, 0)
+        wk = TimeX.apply(w, k, B, C, T, 0)
+
+        self.xx = xx
+        self.bb = (wk[...,-1] - w[...,0,-1] * k[...,-1]) * extra_decay + k[...,-1]
+        self.aa = (wkv[...,-1] - w[...,0,-1] * kv[...,-1]) * extra_decay + kv[...,-1]
+        self.mm = mm
+
+        rwkv = torch.sigmoid(r) * torch.nan_to_num(wkv / wk).transpose(-1, -2)
         rwkv = self.output(rwkv)
         return rwkv
 
@@ -189,8 +206,6 @@ class RWKV_ChannelMix(nn.Module):
     def __init__(self, config, layer_id):
         super().__init__()
         self.layer_id = layer_id
-
-        self.time_shift = nn.ZeroPad2d((0, 0, 1, -1))
 
         with torch.no_grad():  # init to "shift half of the channels"
             x = torch.ones(1, 1, config.n_embd)
@@ -206,8 +221,13 @@ class RWKV_ChannelMix(nn.Module):
         self.value.scale_init = 0
         self.receptance.scale_init = 0
 
+    def time_shift(self, x):
+        return torch.cat([self.xx[...,None,:], x], dim=-2)[...,:-1,:]
+
     def forward(self, x):
+        xx = x[...,-1,:].detach()
         x = x * self.time_mix + self.time_shift(x) * (1 - self.time_mix)
+        self.xx = xx
 
         k = self.key(x)
         k = torch.square(torch.relu(k))
@@ -261,7 +281,6 @@ class GPT(nn.Module):
         super().__init__()
         self.step = 0
         self.config = config
-
         self.emb = nn.Embedding(config.vocab_size, config.n_embd)
 
         self.blocks = nn.Sequential(*[Block(config, i)
@@ -283,9 +302,48 @@ class GPT(nn.Module):
 
         logger.info("number of parameters: %e", sum(p.numel()
                     for p in self.parameters()))
+        self.clear()
 
     def get_ctx_len(self):
         return self.ctx_len
+
+    def clear(self, *batch_idcs):
+        zeros = torch.zeros(1, n_embd, device=self.emb.weight.device)
+        for block in self.blocks:
+            if not batch_idcs:
+                block.ffn.xx = zeros
+                block.att.xx = zeros
+                block.att.aa = zeros
+                block.att.bb = zeros
+                block.att.mm = zeros
+            else:
+                for idx in batch_idcs:
+                    block.ffn.xx[idx] = zeros[0]
+                    block.att.xx[idx] = zeros[0]
+                    block.att.aa[idx] = zeros[0]
+                    block.att.bb[idx] = zeros[0]
+                    block.att.mm[idx] = zeros[0]
+    def save(self, *targets):
+        for target in targets:
+            target.xx = {}
+            target.aa = {}
+            target.bb = {}
+            target.mm = {}
+        for idx, block in enumerate(self.blocks):
+            for batch, target in enumerate(targets):
+                target.xx[f'ffn.{idx}'] = block.ffn.xx[batch]
+                target.xx[f'att.{idx}'] = block.att.xx[batch]
+                target.aa[f'att.{idx}'] = block.att.aa[batch]
+                target.bb[f'att.{idx}'] = block.att.bb[batch]
+                target.mm[f'att.{idx}'] = block.att.mm[batch]
+    def load(self, *targets):
+        zeros = torch.zeros(1, n_embd, device=RUN_DEVICE)
+        for idx, block in enumerate(self.blocks):
+            block.ffn.xx = torch.stack([target.xx[f'ffn.{idx}'] for target in targets]).to(self.emb.weight.device)
+            block.att.xx = torch.stack([target.xx[f'att.{idx}'] for target in targets]).to(self.emb.weight.device)
+            block.att.aa = torch.stack([target.aa[f'att.{idx}'] for target in targets]).to(self.emb.weight.device)
+            block.att.bb = torch.stack([target.bb[f'att.{idx}'] for target in targets]).to(self.emb.weight.device)
+            block.att.mm = torch.stack([target.mm[f'att.{idx}'] if hasattr(target, 'mm') else zeros[0] for target in targets]).to(self.emb.weight.device)
 
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear)):
@@ -323,7 +381,9 @@ class GPT(nn.Module):
 
         return optimizer
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, recur=False):
+        if not recur:
+            self.clear()
         self.step += 1
         B, T = idx.size()
         assert T <= self.ctx_len, "Cannot forward, because len(input) > model ctx_len."
