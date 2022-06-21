@@ -191,8 +191,8 @@ class RWKV_TimeMix(nn.Module):
         T += 1
         extra_decay = w[...,-3]
 
-        wkv = TimeX.apply(w, kv, B, C, T, 0)
-        wk = TimeX.apply(w, k, B, C, T, 0)
+        wkv = TimeX.apply(w, kv, B, C, T, 0)[...,1:]
+        wk = TimeX.apply(w, k, B, C, T, 0)[...,1:]
 
         self.xx = xx
         self.bb = (wk[...,-1] - w[...,0,-1] * k[...,-1]) * extra_decay + k[...,-1]
