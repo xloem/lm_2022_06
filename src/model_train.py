@@ -308,7 +308,7 @@ class GPT(nn.Module):
         return self.ctx_len
 
     def clear(self, *batch_idcs):
-        zeros = torch.zeros(1, n_embd, device=self.emb.weight.device)
+        zeros = torch.zeros(1, self.config.n_embd, device=self.emb.weight.device)
         for block in self.blocks:
             if not batch_idcs:
                 block.ffn.xx = zeros
@@ -337,7 +337,7 @@ class GPT(nn.Module):
                 target.bb[f'att.{idx}'] = block.att.bb[batch]
                 target.mm[f'att.{idx}'] = block.att.mm[batch]
     def load(self, *targets):
-        zeros = torch.zeros(1, n_embd, device=RUN_DEVICE)
+        zeros = torch.zeros(1, self.config.n_embd, device=RUN_DEVICE)
         for idx, block in enumerate(self.blocks):
             block.ffn.xx = torch.stack([target.xx[f'ffn.{idx}'] for target in targets]).to(self.emb.weight.device)
             block.att.xx = torch.stack([target.xx[f'att.{idx}'] for target in targets]).to(self.emb.weight.device)
