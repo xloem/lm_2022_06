@@ -21,7 +21,7 @@ tokenizer = gptmodel.tokenizer
 
 token_id = torch.argmax(state.next_logits,dim=-1).view(-1)[0]
 
-token_ids = []
+token_ids = [0]
 
 def process(token_id):
   # output token
@@ -29,10 +29,11 @@ def process(token_id):
   sys.stdout.write(token)
   sys.stdout.flush()
   # pass through the model
-  token_ids.append(token_id)
+  token_ids[-1] = token_id
+  token_ids.append(0) # padding token is added to simplify comparison with gpt_cuda_unstate
     # load state
   gptmodel.load(state)
-  logits = gptmodel(torch.tensor([token_ids]), recur=True)[0,-1,:]
+  logits = gptmodel(torch.tensor([token_ids]), recur=True)[0,-2,:]
   # use max(range,key) as an argmax for python list to do greedy sampling
   token_id = torch.argmax(logits)
   return token_id
