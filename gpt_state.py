@@ -3,7 +3,7 @@ import sys, pickle, types
 import torch
 from src.model import RWKV_GPT
 
-if len(sys.argv) != 3:
+if len(sys.argv) != 4:
     print('Condenses a prompt to a state file using RWKV_GPT')
     print(f'Usage: {sys.argv[0]} model_name prompt_file state_name')
     sys.exit(-1)
