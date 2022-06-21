@@ -28,6 +28,8 @@ model_name = '20220524-4006'
 
 ########################################################################################################
 
+ctx_len -= 1 # to hold recurrence k & kv
+
 model_train = GPT(GPTConfig(vocab_size, ctx_len, model_type=model_type, n_layer=n_layer, n_embd=n_embd)).cuda()
 print('loading ' + model_name)
 m2 = torch.load(model_name + '.pth')
