@@ -63,5 +63,6 @@ for i in range(src_len):
 print('\nRWKV-train output')
 ctx += [0] * (ctx_len - src_len) # pad to ctx_len
 ctx = [ctx] * 8 # batch 8
-out = model_train.forward(torch.tensor(ctx).cuda())[0][0][:src_len].detach().cpu().numpy()
+with torch.no_grad():
+    out = model_train.forward(torch.tensor(ctx).cuda())[0][0][:src_len].detach().cpu().numpy()
 print(out, '\n')
