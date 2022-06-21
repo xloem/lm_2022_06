@@ -141,6 +141,11 @@ class RWKV_GPT(nn.Module):
         super().__init__()
         print('\nloading RWKV-GPT', MODEL_NAME)
 
+        w = torch.load(MODEL_NAME + '.pth', map_location=torch.device(RUN_DEVICE))
+        global vocab_size, n_embd, n_layer
+        vocab_size, n_embd = w['emb.weight'].shape
+        n_layer = len([key for key in w.keys() if key.endswith('att.key.weight')])
+
         self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=VOCAB_NAME)
         self.emb = nn.Embedding(vocab_size, n_embd)
 
@@ -151,7 +156,7 @@ class RWKV_GPT(nn.Module):
 
         self.ctx_len = ctx_len
         self.eval()
-        self.load_state_dict(torch.load(MODEL_NAME + '.pth', map_location=torch.device(RUN_DEVICE)))
+        self.load_state_dict(state_dict)
         self.clear()
         self.eval()
 
@@ -214,14 +219,17 @@ time_buf = {}
 class RWKV_RNN():
     def __init__(self, MODEL_NAME=MODEL_NAME):
         print('\nloading RWKV-RNN', MODEL_NAME)
-        self.ctx_len = ctx_len
-        self.n_layer = n_layer
-        self.n_embd = n_embd
-        self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=VOCAB_NAME)
-
         self.w = types.SimpleNamespace()
         
+        global vocab_size, n_embd, n_layer
         w = torch.load(MODEL_NAME + '.pth', map_location=torch.device(RUN_DEVICE))
+        vocab_size, n_embd = w['emb.weight'].shape
+        n_layer = len([key for key in w.keys() if key.endswith('att.key.weight')])
+
+        self.ctx_len = ctx_len
+        self.n_embd = n_embd
+        self.n_layer = n_layer
+        self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=VOCAB_NAME)
 
         for x in w.keys():
             if '.time_' in x:
