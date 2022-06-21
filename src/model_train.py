@@ -158,7 +158,7 @@ class RWKV_TimeMix(nn.Module):
         self.output.scale_init = 0
 
     def time_shift(self, x):
-        return torch.cat([self.xx[...,None,:], x], dim=-2)[...,:-1,:]
+        return torch.cat([self.xx.expand(x.shape[0], x.shape[-1])[...,None,:], x], dim=-2)[...,:-1,:]
 
     def forward(self, x):
         B, T, C = x.size()
@@ -224,7 +224,7 @@ class RWKV_ChannelMix(nn.Module):
         self.receptance.scale_init = 0
 
     def time_shift(self, x):
-        return torch.cat([self.xx[...,None,:], x], dim=-2)[...,:-1,:]
+        return torch.cat([self.xx.expand(x.shape[0],x.shape[-1])[...,None,:], x], dim=-2)[...,:-1,:]
 
     def forward(self, x):
         xx = x[...,-1,:]

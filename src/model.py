@@ -42,7 +42,7 @@ class RWKV_ChannelMix(nn.Module):
         self.value = nn.Linear(hidden_sz, n_embd, bias=False)
 
     def time_shift(self, x):
-        return torch.cat([self.xx.to(x.device)[...,None,:], x], dim=-2)[...,:-1,:]
+        return torch.cat([self.xx.to(x.device)[...,None,:].expand(x.shape[0],1,x.shape[-1]), x], dim=-2)[...,:-1,:]
 
     def forward(self, x):
         xx = x[...,-1,:]
@@ -73,7 +73,7 @@ class RWKV_TimeMix(nn.Module):
         self.output = nn.Linear(n_embd, n_embd, bias=False)
 
     def time_shift(self, x):
-        return torch.cat([self.xx.to(x.device)[...,None,:], x], dim=-2)[...,:-1,:]
+        return torch.cat([self.xx.to(x.device).expand(x.shape[0], x.shape[-1])[...,None,:], x], dim=-2)[...,:-1,:]
 
     def forward(self, x):
         B, T, C = x.size()
