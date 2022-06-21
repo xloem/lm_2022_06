@@ -156,7 +156,7 @@ class RWKV_GPT(nn.Module):
 
         self.ctx_len = ctx_len
         self.eval()
-        self.load_state_dict(state_dict)
+        self.load_state_dict(w)
         self.clear()
         self.eval()
 

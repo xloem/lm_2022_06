@@ -4,7 +4,7 @@ import src.model
 from src.model import RWKV_GPT
 from src.model_train import GPT as GPT_Train, GPTConfig
 import torch
-src.
+
 if len(sys.argv) != 3:
     print('Continues a prompt from a state file using RWKV_GPT')
     print(f'Usage: {sys.argv[0]} model_name state_name')
