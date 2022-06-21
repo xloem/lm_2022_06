@@ -164,7 +164,9 @@ class RWKV_TimeMix(nn.Module):
         B, T, C = x.size()
         assert T == self.ctx_len - 1
 
+        xx = x[...,-1,:]
         x = x * self.time_mix + self.time_shift(x) * (1 - self.time_mix)
+        self.xx = xx
 
         k = self.key(x).transpose(-1, -2)
         v = self.value(x).transpose(-1, -2)
@@ -225,7 +227,7 @@ class RWKV_ChannelMix(nn.Module):
         return torch.cat([self.xx[...,None,:], x], dim=-2)[...,:-1,:]
 
     def forward(self, x):
-        xx = x[...,-1,:].detach()
+        xx = x[...,-1,:]
         x = x * self.time_mix + self.time_shift(x) * (1 - self.time_mix)
         self.xx = xx
 
