@@ -37,14 +37,14 @@ def process(token_id):
   sys.stdout.write(token)
   sys.stdout.flush()
   # pass through the model
+  token_ids[0,token_id_ct] = token_id
+  token_id_ct += 1
     # load state
   gptmodel.load(state)
   with torch.no_grad():
-      logits = gptmodel(token_ids.expand(B_GROUP_FORWARD,ctx_len), recur=True)[0][0,token_id_ct,:]
+      logits = gptmodel(token_ids.expand(B_GROUP_FORWARD,ctx_len), recur=True)[0][0,token_id_ct-1,:]
   # use max(range,key) as an argmax for python list to do greedy sampling
   token_id = torch.argmax(logits)
-  token_ids[0,token_id_ct] = token_id
-  token_id_ct += 1
   return token_id
 
 while True:
