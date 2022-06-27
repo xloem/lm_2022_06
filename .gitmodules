@@ -1,0 +1,6 @@
+[submodule "RWKV/RWKV-v2-RNN-Pile"]
+	path = RWKV/RWKV-v2-RNN-Pile
+	url = https://github.com/xloem/RWKV-v2-RNN-Pile
+[submodule "RWKV/RWKV-LM"]
+	path = RWKV/RWKV-LM
+	url = https://github.com/BlinkDL/RWKV-LM
