@@ -6,7 +6,7 @@ for long running tests, run them in a separate tmux window to not be distracting
 
 ## Reproducing BlinkDL's Results
 - vast.ai machine 1702 had best tflops/$/hr when I used the interface (43.0 TF/$0.207)
-        running at about 3:10/epoch , so 500 epochs is 27 hours and $6 or so
+        running at about 3:20/epoch , so 500 epochs is 28 hours and $6 or so
     import vast
     instance = vast.Instance(query = 'machine_id=1701', instance_type='on-demand', image='nvidia/cuda:11.7.0-devel-ubuntu22.04')
     instance.create(); instance.wait()
