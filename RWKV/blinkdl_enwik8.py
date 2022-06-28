@@ -2,9 +2,9 @@ import datetime, io, sys, time
 import vast, logging, fabric, tqdm
 logging.basicConfig(level=logging.INFO)
 
-#instance = vast.Instance(query='', sort='flops_usd-', instance_type='on-demand', image='nvidia/cuda:11.3.1-devel-ubuntu20.04', GiB=8)
-#instance = vast.Instance(query='total_flops>30', sort='flops_usd-', instance_type='on-demand', image='pytorch/pytorch:1.11.0-cuda11.3-cudnn8-devel', GiB=8)
-instance = vast.Instance(query='total_flops>40', sort='dph_total', instance_type='on-demand', image='pytorch/pytorch:1.11.0-cuda11.3-cudnn8-devel', GiB=8)
+#instance = vast.Instance(query='gpu_ram>8.58', sort='flops_usd-', instance_type='on-demand', image='nvidia/cuda:11.3.1-devel-ubuntu20.04', GiB=2)
+#instance = vast.Instance(query='gpu_ram>8.58 total_flops>30', sort='flops_usd-', instance_type='on-demand', image='pytorch/pytorch:1.11.0-cuda11.3-cudnn8-devel', GiB=2)
+instance = vast.Instance(query='gpu_ram>8.58', sort='dph_total', instance_type='on-demand', image='pytorch/pytorch:1.11.0-cuda11.3-cudnn8-devel', GiB=2)
 instance.create()
 try:
     # at 43 TFlops, each of 500 epochs was taking about 3:20
