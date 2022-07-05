@@ -58,9 +58,18 @@ try:
         print()
         #import pdb; pdb.set_trace()
 
+        date_start = datetime.datetime.now()
+
         shell.run('tmux new-session -d -s job "./in_tree_run python3 train.py"', pty=True)
 
         shell.run('tmux attach-session -t job', pty=True)
+
+        files = sftp.listdir('RWKV-LM/RWKV-v2-RNN')
+        
+        sftp.get('RWKV-LM/RWKV-v2-RNN/mylog.txt', f'blinkdl_enwik8-{date_start.isoformat()}.txt')
+        for file in files:
+            if file.endswith('.pth'):
+                sftp.get('RWKV-LM/RWKV-v2-RNN/' + file, f'blinkdl_wneik8-{date_start.isoformat()}-{file}')
     
 finally:
     instance.destroy()
